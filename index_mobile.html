@@ -763,12 +763,7 @@ microScene.background=new T.Color(0x000000);
 const microCam=new T.PerspectiveCamera(45,innerWidth/innerHeight,0.01,5);
 microCam.position.set(0,0.25,0.6);microCam.lookAt(0,0,0);
 microWorlds.forEach(w=>microScene.add(w));
-const microRT=_rt(innerWidth,innerHeight);
-const microQuadMat=new T.ShaderMaterial({
-  uniforms:{tMicro:{value:microRT.texture},tMacro:{value:bloomRT.texture},alpha:{value:0}},
-  vertexShader:_bVert,
-  fragmentShader:`uniform sampler2D tMicro;uniform sampler2D tMacro;uniform float alpha;varying vec2 vUv;void main(){vec4 macro=texture2D(tMacro,vUv);vec4 micro=texture2D(tMicro,vUv);gl_FragColor=mix(macro,micro,alpha);}`
-});
+microCam.aspect=innerWidth/innerHeight;microCam.updateProjectionMatrix();
 
 // Hand orb
 const handOrbGeo=new T.SphereGeometry(0.5,32,32);
@@ -820,25 +815,39 @@ function procHand(lm){
 
 let camStream=null;
 async function initCam(){
-  if(!isHTTP)return;
+  if(!isHTTP)return false;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
     if(isMobile){setLoad('创世之掌·七日谈','📱 触控操作 · 无摄像头');}else{setLoad('创世之掌·七日谈','🔒 摄像头不可用');}
-    $skip.style.display='block';return;
+    return false;
   }
   setLoad('创世之掌·七日谈','📷 请求摄像头权限…');
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
   video.srcObject=null;
   try{
-    const constr={video:{facingMode:'user'}};
+    let constr={video:true};
     if(isMobile){constr.video.width={ideal:320};constr.video.height={ideal:240};}else{constr.video.width={ideal:640};constr.video.height={ideal:480};}
-    const s=await navigator.mediaDevices.getUserMedia(constr);
+    let s;
+    try{
+      s=await navigator.mediaDevices.getUserMedia(constr);
+    }catch(e1){
+      console.warn('Camera attempt 1 failed:',e1.message);
+      constr.video={...constr.video,facingMode:{exact:'environment'}};
+      try{s=await navigator.mediaDevices.getUserMedia(constr);}catch(e2){
+        console.warn('Camera attempt 2 (rear) failed:',e2.message);
+        s=await navigator.mediaDevices.getUserMedia({video:true});
+        console.log('Camera attempt 3 (any): ok');
+      }
+    }
     camStream=s;video.srcObject=s;$skip.style.display='none';
     try{await video.play()}catch(e){}
     setLoad('创世之掌·七日谈',isMobile?'📱 摄像头 · 触控操作':'📷 摄像头已就绪');
     if(video.readyState<2)await new Promise(r=>{const t=setTimeout(()=>r(),5000);video.addEventListener('loadedmetadata',()=>{clearTimeout(t);r()},{once:true});});
+    camInitDone=true;
+    return true;
   }catch(e){
-    setLoad('创世之掌·七日谈',isMobile?'📱 触控操作':'📷 点击按钮继续');
-    $skip.style.display='block';
+    console.error('All camera attempts failed:',e.message||e);
+    setLoad('创世之掌·七日谈',isMobile?'📱 触控操作':'📷 摄像头不可用 · 触控模式');
+    return false;
   }
 }
 window.addEventListener('beforeunload',()=>{if(camStream)camStream.getTracks().forEach(t=>t.stop())});
@@ -853,18 +862,18 @@ async function initMP(){
   if(isMobile)mpTimeout=setTimeout(()=>{setLoad('创世之掌·七日谈','⚠️ 手势识别加载超时 · 触控操作');completeBoot();mpTimeout=null;},8000);
   try{
     const m=await import('./lib/vision_bundle.js');
-    if(mpTimeout===null)return; // already timed out
+    if(isMobile&&mpTimeout===null)return; // already timed out
     setLoad('创世之掌·七日谈','⏳ 加载 WASM…');
     const v=await m.FilesetResolver.forVisionTasks('lib/wasm');
-    if(mpTimeout===null)return;
+    if(isMobile&&mpTimeout===null)return;
     setLoad('创世之掌·七日谈','⏳ 加载模型…');
     const r=await fetch('lib/hand_landmarker.task',{cache:'force-cache'});
     if(!r.ok)throw Error('模型文件加载失败');
     const b=await r.arrayBuffer();
-    if(mpTimeout===null)return;
+    if(isMobile&&mpTimeout===null)return;
     setLoad('创世之掌·七日谈','⏳ 初始化识别器…');
     hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.5,minTrackingConfidence:0.5});
-    if(mpTimeout===null)return;
+    if(isMobile&&mpTimeout===null)return;
     setLoad('创世之掌·七日谈','✨ 造物主之手已就绪');
     mpStarted=true;
     if(mpTimeout){clearTimeout(mpTimeout);mpTimeout=null;}
@@ -887,11 +896,6 @@ function completeBoot(){
   }
   initAudio();initWeather();setTimeout(()=>{if(currentDay<0)setDay(0);},600);
 }
-
-$skip.addEventListener('click',()=>{
-  $skip.style.display='none';
-  completeBoot();
-});
 
 function detectFrame(){
   if(touchModeForced){gs.hp=false;gs2.hp=false;handsCount=0;return;}
@@ -937,6 +941,7 @@ function setDay(dayIdx){
   if(dayIdx===currentDay||dayIdx<0||dayIdx>7)return;
   if(currentDay===7){summaryPlaying=false;summarySeg=-1;summaryTimer=0;$summaryOver.classList.remove('on');$credits.classList.remove('show');}
   prevDay=currentDay;currentDay=dayIdx;
+  microActive=false;microAlpha=0;touchMicroActive=false;
   dayTransition={active:true,phase:'explode',progress:0,fromDay:prevDay,toDay:dayIdx};
   const day=DAYS[dayIdx];
   if(day.activeLayers[0]==='all'){cosmicLayers.forEach(l=>l.tar=1);}
@@ -1183,8 +1188,8 @@ document.addEventListener('touchstart',initAudio,{once:true});
 document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const d=currentDay<0?0:e.key==='ArrowRight'?(currentDay+1)%8:(currentDay+7)%8;setDay(d);}});
 // ========== MOBILE TOUCH: pinch zoom + drag rotate + double tap ==========
 document.addEventListener('touchstart',e=>{
-  // Skip preventDefault to allow click events on nav buttons
-  if(e.target.closest('#mobile-nav'))return;
+  // Skip preventDefault to allow click events on loading screen buttons and nav
+  if(e.target.closest('#mobile-nav')||e.target.closest('#mode-toggle')||e.target.closest('#skip-btn')||e.target.closest('#load-hint'))return;
   e.preventDefault();
   touchStartX=e.touches[0].clientX;
   touchStartY=e.touches[0].clientY;
@@ -1222,15 +1227,15 @@ document.addEventListener('touchend',e=>{
   if(e.touches.length===0&&e.changedTouches.length===1&&touchCount<=1&&microAlpha<0.3){
     const dx=e.changedTouches[0].clientX-touchStartX;
     const dy=e.changedTouches[0].clientY-touchStartY;
-    if(Math.abs(dx)>Math.abs(dy)*2&&Math.abs(dx)>60&&!dayTransition.active&&fistRel.lock<=0){
+    if(Math.abs(dx)>Math.abs(dy)*2&&Math.abs(dx)>60&&!dayTransition.active&&fistRel.lock<=0&&!microActive){
       dx>0?goPrevDay():goNextDay();
     }
   }
   touchCount=0;
 },{passive:true});
 // Mobile nav buttons
-$navPrev.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0)goPrevDay();});
-$navNext.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0)goNextDay();});
+$navPrev.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0&&!microActive)goPrevDay();});
+$navNext.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0&&!microActive)goNextDay();});
 // Touch mode toggle (force touch fallback even with camera)
 let touchModeForced=false;
 const $modeToggle=$('mode-toggle');
@@ -1242,26 +1247,50 @@ $modeToggle.addEventListener('click',()=>{
   else{toast('📷 恢复摄像头模式');$hintDisplay.textContent='🤜🤛 手势控制 · 点击箭头/滑动切换七日';}
 });
 
+let bootHandled=false;
+
 setLoad('创世之掌·七日谈','起初，神创造天地…');
 requestAnimationFrame(animate);
 
-// Start camera, then MP
-initCam().then(()=>{
-  camInitDone=true;
-  return initMP();
-}).catch(()=>{});
+$skip.textContent='📷 打开摄像头';
+$skip.style.display='block';
+$hint.innerHTML='<span style="cursor:pointer;text-decoration:underline;color:rgba(140,180,220,0.7)">👆 进入触控模式</span>';
 
-// Safety fallback: if boot hasn't completed in 8s, show skip + auto-complete at 15s
+$skip.addEventListener('click',async ()=>{
+  bootHandled=true;
+  $skip.textContent='⏳ 正在请求摄像头…';
+  $skip.style.pointerEvents='none';
+  $hint.textContent='';
+  setLoad('创世之掌·七日谈','📷 请求摄像头权限…');
+  const ok=await initCam();
+  if(!ok){
+    setLoad('创世之掌·七日谈','⚠️ 摄像头不可用 · 触控模式');
+    setTimeout(()=>{if(!$load.classList.contains('done'))completeBoot();},1200);
+    return;
+  }
+  setLoad('创世之掌·七日谈','⏳ 加载手势引擎…');
+  try{await initMP();}catch(e){}
+  if(!$load.classList.contains('done'))completeBoot();
+});
+
+$hint.addEventListener('click',e=>{
+  if(bootHandled)return;
+  bootHandled=true;
+  $skip.style.display='none';
+  $hint.textContent='';
+  completeBoot();
+});
+
+// Safety fallback: auto-complete after 15s if user hasn't clicked
 setTimeout(()=>{
-  if(!$load.classList.contains('done')){
-    $skip.style.display='block';
+  if(!bootHandled&&!$load.classList.contains('done')){
     setLoad('创世之掌·七日谈','⏳ 加载时间较长…');
   }
 },8000);
 setTimeout(()=>{
-  if(!$load.classList.contains('done')){
+  if(!bootHandled&&!$load.classList.contains('done')){
     completeBoot();
-    toast('📷 摄像头未就绪 — 已进入预览模式');
+    toast('👆 已进入触控模式');
   }
 },15000);
 
@@ -1274,7 +1303,6 @@ window.addEventListener('resize',()=>{
   bloomRT.setSize(w,h);
   halfRT.setSize(bloomW,bloomH);
   halfRT2.setSize(bloomW,bloomH);
-  microRT.setSize(w,h);
   if($weather){$weather.width=w;$weather.height=h;}
   [blurH,blurV].forEach(m=>{m.uniforms.res.value.set(bloomW,bloomH);});
 });
