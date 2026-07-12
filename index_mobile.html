@@ -140,6 +140,7 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 <div id="toast"></div>
 <div id="mobile-nav"><button class="nav-btn nav-prev" id="nav-prev"><span class="arrow">‹</span></button><button class="nav-btn nav-next" id="nav-next"><span class="arrow">›</span></button></div>
 <button id="mode-toggle">📷 触控</button>
+<audio id="bgm0" preload="none"></audio><audio id="bgm1" preload="none"></audio><audio id="bgm2" preload="none"></audio><audio id="bgm3" preload="none"></audio><audio id="bgm4" preload="none"></audio><audio id="bgm5" preload="none"></audio><audio id="bgm6" preload="none"></audio><audio id="bgm-switch" preload="none"></audio>
 
 <div id="hud">
   <div class="label">创世之掌</div>
@@ -556,32 +557,31 @@ function updateWeather(dt,t){
   }
 }
 
-// ========== MOBILE BGM (Web Audio API, buffer pre-decode) ==========
-let bgmBuffers=[],bgmSource=null,bgmGain=null,bgmIdx=-1,bgmPending=-1,switchBuffer=null;
+// ========== MOBILE BGM (HTML5 Audio, reliable on iOS/Android) ==========
+let bgmIdx=-1,bgmAudio=null;
 const BGM_FILES=["audio/day00_mobile.mp3","audio/day1.mp3","audio/day2.mp3","audio/day3.mp3","audio/day4.mp3","audio/day5.mp3","audio/day6.mp3"];
 function initBGM(){
-  fetch('audio/切换.mp3').then(r=>r.arrayBuffer()).then(b=>aCtx.decodeAudioData(b)).then(b=>{switchBuffer=b;}).catch(e=>{});
-  BGM_FILES.forEach((u,i)=>{fetch(u).then(r=>r.arrayBuffer()).then(b=>aCtx.decodeAudioData(b)).then(b=>{bgmBuffers[i]=b;if(bgmPending===i){bgmPending=-1;switchBGM(i);}}).catch(e=>{});});
+  // Preload all BGM at startup
+  BGM_FILES.forEach((url,i)=>{const el=document.getElementById('bgm'+i);if(el&&!el.src){el.src=url;el.loop=true;el.preload='auto';}});
+  const sw=document.getElementById('bgm-switch');if(sw&&!sw.src)sw.src='audio/切换.mp3';
 }
 function switchBGM(idx){
-  if(!aInit||idx===bgmIdx||idx<0||idx>6)return;
-  if(!bgmBuffers[idx]){bgmPending=idx;return;}
-  const n=aCtx.currentTime;
-  if(bgmSource&&bgmGain){
-    const oldSrc=bgmSource;const oldG=bgmGain;
-    oldG.gain.cancelScheduledValues(n);oldG.gain.setValueAtTime(oldG.gain.value,n);oldG.gain.setTargetAtTime(0,n,0.3);
-    setTimeout(()=>{try{oldSrc.stop()}catch(e){}try{oldSrc.disconnect()}catch(e){}try{oldG.disconnect()}catch(e){}},2000);
-  }
-  const src=aCtx.createBufferSource();src.buffer=bgmBuffers[idx];src.loop=true;
-  const g=aCtx.createGain();g.gain.value=0;g.gain.setTargetAtTime(0.5,n,0.3);
-  src.connect(g);g.connect(mGain);src.start(n);
-  bgmSource=src;bgmGain=g;bgmIdx=idx;
+  if(idx===bgmIdx||idx<0||idx>6)return;
+  if(bgmAudio){try{bgmAudio.pause();bgmAudio.currentTime=0;}catch(e){}}
+  const el=document.getElementById('bgm'+idx);
+  if(!el){bgmIdx=-1;return;}
+  el.volume=0.6;
+  el.currentTime=0;
+  el.play().catch(e=>{});
+  bgmAudio=el;
+  bgmIdx=idx;
 }
 function playWhoosh2(){
-  if(!aInit||!switchBuffer)return;
-  const n=aCtx.currentTime;const src=aCtx.createBufferSource();
-  src.buffer=switchBuffer;const g=aCtx.createGain();
-  g.gain.value=0.4;src.connect(g);g.connect(mGain);src.start(n);
+  const sw=document.getElementById('bgm-switch');
+  if(!sw)return;
+  sw.volume=0.4;
+  sw.currentTime=0;
+  sw.play().catch(e=>{});
 }
 
 // Narrative particle systems
@@ -848,21 +848,29 @@ let hdl=null,lastVT=-1,camInitDone=false,mpStarted=false,detectSkip=0;
 async function initMP(){
   if(!isHTTP||!camInitDone){if(!isHTTP)setLoad('创世之掌·七日谈','💡 文件协议 — 摄像头不可用，进入预览');completeBoot();return;}
   setLoad('创世之掌·七日谈','⏳ 加载推理引擎…');
+  // On mobile, set a timeout — if MediaPipe takes >8s, fall back to touch mode
+  let mpTimeout=null;
+  if(isMobile)mpTimeout=setTimeout(()=>{setLoad('创世之掌·七日谈','⚠️ 手势识别加载超时 · 触控操作');completeBoot();mpTimeout=null;},8000);
   try{
     const m=await import('./lib/vision_bundle.js');
+    if(mpTimeout===null)return; // already timed out
     setLoad('创世之掌·七日谈','⏳ 加载 WASM…');
     const v=await m.FilesetResolver.forVisionTasks('lib/wasm');
+    if(mpTimeout===null)return;
     setLoad('创世之掌·七日谈','⏳ 加载模型…');
-    const r=await fetch('lib/hand_landmarker.task');
+    const r=await fetch('lib/hand_landmarker.task',{cache:'force-cache'});
     if(!r.ok)throw Error('模型文件加载失败');
     const b=await r.arrayBuffer();
+    if(mpTimeout===null)return;
     setLoad('创世之掌·七日谈','⏳ 初始化识别器…');
-    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.6,minTrackingConfidence:0.5});
+    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.5,minTrackingConfidence:0.5});
+    if(mpTimeout===null)return;
     setLoad('创世之掌·七日谈','✨ 造物主之手已就绪');
     mpStarted=true;
+    if(mpTimeout){clearTimeout(mpTimeout);mpTimeout=null;}
   }catch(e){
     console.error('MP init error:',e);
-    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用');
+    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用 · 触控操作');
   }
   completeBoot();
 }
