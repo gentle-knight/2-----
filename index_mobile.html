@@ -826,7 +826,7 @@ async function initCam(){
   video.srcObject=null;
   const RETRY_ERRORS=['NotFoundError','OverconstrainedError','TypeError'];
   try{
-    let constr={video:true};
+    let constr={video:{}};
     if(isMobile){constr.video.width={ideal:320};constr.video.height={ideal:240};}else{constr.video.width={ideal:640};constr.video.height={ideal:480};}
     let s;
     try{
