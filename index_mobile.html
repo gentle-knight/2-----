@@ -98,15 +98,15 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
   #verse-3d p{font-size:13px;letter-spacing:3px}
   #micro-overlay{bottom:14%}#micro-overlay .micro-name{font-size:15px;letter-spacing:5px}#micro-overlay .micro-desc{font-size:12px;letter-spacing:3px;max-width:360px}
 }
-/* Mobile nav buttons */
+/* Mobile nav buttons - narrower, only the arrows themselves */
 #mobile-nav{position:fixed;bottom:0;left:0;right:0;z-index:15;display:flex;justify-content:space-between;pointer-events:none;height:calc(100% - 100px);top:0;padding:60px 0 40px;opacity:0;transition:opacity 0.8s}
 #mobile-nav.show{opacity:1}
-#mobile-nav .nav-btn{pointer-events:auto;width:40%;height:100%;background:none;border:none;cursor:pointer;position:relative;transition:background 0.3s;outline:none;-webkit-tap-highlight-color:transparent}
+#mobile-nav .nav-btn{pointer-events:auto;width:56px;height:100%;background:none;border:none;cursor:pointer;position:relative;transition:background 0.3s;outline:none;-webkit-tap-highlight-color:transparent}
 #mobile-nav .nav-btn:active{background:rgba(80,140,220,0.08)}
-#mobile-nav .nav-btn .arrow{position:absolute;top:50%;transform:translateY(-50%);font-size:36px;color:rgba(180,210,240,0.12);letter-spacing:0;transition:color 0.3s;text-shadow:0 0 20px rgba(80,140,220,0.08)}
-#mobile-nav .nav-btn:active .arrow{color:rgba(180,210,240,0.45)}
-#mobile-nav .nav-prev .arrow{left:12px}
-#mobile-nav .nav-next .arrow{right:12px}
+#mobile-nav .nav-btn .arrow{position:absolute;top:50%;transform:translateY(-50%);font-size:28px;color:rgba(180,210,240,0.15);letter-spacing:0;transition:color 0.3s;text-shadow:0 0 20px rgba(80,140,220,0.08)}
+#mobile-nav .nav-btn:active .arrow{color:rgba(180,210,240,0.5)}
+#mobile-nav .nav-prev .arrow{left:8px}
+#mobile-nav .nav-next .arrow{right:8px}
 
 #summary-overlay{position:fixed;inset:0;z-index:32;pointer-events:none;opacity:0;transition:opacity 1.5s;background:radial-gradient(ellipse at center,rgba(8,4,2,0.4) 0%,rgba(8,4,2,0.7) 100%)}
 #summary-overlay.on{opacity:1}
@@ -136,14 +136,14 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 <div id="credits">制作 lalalaure</div>
 <div id="toast"></div>
 <div id="mobile-nav"><button class="nav-btn nav-prev" id="nav-prev"><span class="arrow">‹</span></button><button class="nav-btn nav-next" id="nav-next"><span class="arrow">›</span></button></div>
-<audio id="bgm0" preload="none" loop></audio>
-<audio id="bgm1" preload="none" loop></audio>
-<audio id="bgm2" preload="none" loop></audio>
-<audio id="bgm3" preload="none" loop></audio>
-<audio id="bgm4" preload="none" loop></audio>
-<audio id="bgm5" preload="none" loop></audio>
-<audio id="bgm6" preload="none" loop></audio>
-<audio id="bgm-switch" preload="none"></audio>
+<audio id="bgm0" preload="auto" loop></audio>
+<audio id="bgm1" preload="auto" loop></audio>
+<audio id="bgm2" preload="auto" loop></audio>
+<audio id="bgm3" preload="auto" loop></audio>
+<audio id="bgm4" preload="auto" loop></audio>
+<audio id="bgm5" preload="auto" loop></audio>
+<audio id="bgm6" preload="auto" loop></audio>
+<audio id="bgm-switch" preload="auto"></audio>
 <div id="hud">
   <div class="label">创世之掌</div>
   <div class="day" id="day-display">🌌 虚空</div>
@@ -559,26 +559,28 @@ function updateWeather(dt,t){
   }
 }
 
-// ========== MOBILE BGM (HTML5 Audio, reliable on iOS/Android) ==========
+// ========== MOBILE BGM (HTML5 Audio, preload all at startup) ==========
 let bgmIdx=-1,bgmAudio=null;
 const BGM_FILES=["audio/day00_mobile.mp3","audio/day1.mp3","audio/day2.mp3","audio/day3.mp3","audio/day4.mp3","audio/day5.mp3","audio/day6.mp3"];
 function initBGM(){
+  // Preload all BGM and switch sound at startup
+  BGM_FILES.forEach((url,i)=>{const el=$('bgm'+i);if(el)el.src=url;});
   const sw=$('bgm-switch');if(sw)sw.src='audio/切换.mp3';
 }
 function switchBGM(idx){
-  if(idx===bgmIdx)return;
+  if(idx===bgmIdx||idx<0||idx>6)return;
   if(bgmAudio){try{bgmAudio.pause();bgmAudio.currentTime=0;}catch(e){}}
   const el=$('bgm'+idx);
   if(!el){bgmIdx=-1;return;}
-  el.src=BGM_FILES[idx];
   el.volume=0.5;
+  el.currentTime=0;
   el.play().catch(e=>{});
   bgmAudio=el;
   bgmIdx=idx;
 }
 function playWhoosh2(){
   const sw=$('bgm-switch');
-  if(!sw||!sw.src)return;
+  if(!sw)return;
   sw.volume=0.4;
   sw.currentTime=0;
   sw.play().catch(e=>{});
@@ -844,16 +846,16 @@ async function initMP(){
     setLoad('创世之掌·七日谈','⏳ 加载 WASM…');
     const v=await m.FilesetResolver.forVisionTasks('lib/wasm');
     setLoad('创世之掌·七日谈','⏳ 加载模型…');
-    const r=await fetch('lib/hand_landmarker.task');
+    const r=await fetch('lib/hand_landmarker.task',{cache:'force-cache'});
     if(!r.ok)throw Error('模型文件加载失败');
     const b=await r.arrayBuffer();
     setLoad('创世之掌·七日谈','⏳ 初始化识别器…');
-    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.6,minTrackingConfidence:0.5});
+    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.5,minTrackingConfidence:0.5});
     setLoad('创世之掌·七日谈','✨ 造物主之手已就绪');
     mpStarted=true;
   }catch(e){
     console.error('MP init error:',e);
-    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用');
+    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用 · 触控操作');
   }
   completeBoot();
 }
@@ -861,14 +863,13 @@ async function initMP(){
 function completeBoot(){
   $load.classList.add('done');
   $mobileNav.classList.add('show');
-  if(isMobile||!mpStarted){
-    toast('👆 左右滑动切换七日 · 或点击两侧箭头');
-    $hintDisplay.textContent='👆 左右滑动 / 点击箭头切换七日';
+  if(mpStarted){
+    toast('🤜🤛 双手握拳 → ✋ 张开创世 · 七日创世之旅');
+    $hintDisplay.textContent='🤜🤛 手势控制 · 点击箭头/滑动切换七日';
   }else{
-    toast('🤜🤛 双手握拳/捏合 → ✋ 张开创世 · 七日创世之旅');
-    $hintDisplay.textContent='🤜🤛 双手同步手势 → ✋ 张开创世';
+    toast('👆 滑动切换七日 · 双击微观世界 · 双指缩放');
+    $hintDisplay.textContent='👆 触控模式 · 滑动切换 · 双击微世界';
   }
-  if(!mpStarted&&!isMobile)toast('无手势识别 — 按键 ← → 切换七日');
   initAudio();initWeather();setTimeout(()=>{if(currentDay<0)setDay(0);},600);
 }
 
@@ -1188,12 +1189,13 @@ document.addEventListener('touchend',e=>{
   if(now-lastTap<400&&touchCount===1&&!dayTransition.active&&fistRel.lock<=0){
     if(microAlpha<0.1){microActive=true;fistRel.cooldown=0.3;toast('🌍 微观世界');}
     else{microActive=false;microAlpha=0;toast('🌌 返回宇宙');}
+    lastTap=0;touchCount=0;return; // ← skip swipe check after double tap
   }
   lastTap=now;
-  if(e.touches.length===0&&e.changedTouches.length===1&&touchCount<=1){
+  if(e.touches.length===0&&e.changedTouches.length===1&&touchCount<=1&&microAlpha<0.3){
     const dx=e.changedTouches[0].clientX-touchStartX;
     const dy=e.changedTouches[0].clientY-touchStartY;
-    if(Math.abs(dx)>Math.abs(dy)*2&&Math.abs(dx)>60&&!dayTransition.active&&fistRel.lock<=0&&microAlpha<0.3){
+    if(Math.abs(dx)>Math.abs(dy)*2&&Math.abs(dx)>60&&!dayTransition.active&&fistRel.lock<=0){
       dx>0?goPrevDay():goNextDay();
     }
   }
