@@ -1276,8 +1276,7 @@ $skip.addEventListener('click',async ()=>{
   setLoad('创世之掌·七日谈','📷 请求摄像头权限…');
   const ok=await initCam();
   if(!ok){
-    setLoad('创世之掌·七日谈','⚠️ 摄像头不可用 · 触控模式');
-    setTimeout(()=>{if(!$load.classList.contains('done'))completeBoot();},1200);
+    setTimeout(()=>{if(!$load.classList.contains('done'))completeBoot();},1500);
     return;
   }
   setLoad('创世之掌·七日谈','⏳ 加载手势引擎…');
