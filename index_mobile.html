@@ -136,14 +136,7 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 <div id="credits">制作 lalalaure</div>
 <div id="toast"></div>
 <div id="mobile-nav"><button class="nav-btn nav-prev" id="nav-prev"><span class="arrow">‹</span></button><button class="nav-btn nav-next" id="nav-next"><span class="arrow">›</span></button></div>
-<audio id="bgm0" preload="auto" loop></audio>
-<audio id="bgm1" preload="auto" loop></audio>
-<audio id="bgm2" preload="auto" loop></audio>
-<audio id="bgm3" preload="auto" loop></audio>
-<audio id="bgm4" preload="auto" loop></audio>
-<audio id="bgm5" preload="auto" loop></audio>
-<audio id="bgm6" preload="auto" loop></audio>
-<audio id="bgm-switch" preload="auto"></audio>
+
 <div id="hud">
   <div class="label">创世之掌</div>
   <div class="day" id="day-display">🌌 虚空</div>
@@ -559,31 +552,32 @@ function updateWeather(dt,t){
   }
 }
 
-// ========== MOBILE BGM (HTML5 Audio, preload all at startup) ==========
-let bgmIdx=-1,bgmAudio=null;
+// ========== MOBILE BGM (Web Audio API, buffer pre-decode) ==========
+let bgmBuffers=[],bgmSource=null,bgmGain=null,bgmIdx=-1,bgmPending=-1,switchBuffer=null;
 const BGM_FILES=["audio/day00_mobile.mp3","audio/day1.mp3","audio/day2.mp3","audio/day3.mp3","audio/day4.mp3","audio/day5.mp3","audio/day6.mp3"];
 function initBGM(){
-  // Preload all BGM and switch sound at startup
-  BGM_FILES.forEach((url,i)=>{const el=$('bgm'+i);if(el)el.src=url;});
-  const sw=$('bgm-switch');if(sw)sw.src='audio/切换.mp3';
+  fetch('audio/切换.mp3').then(r=>r.arrayBuffer()).then(b=>aCtx.decodeAudioData(b)).then(b=>{switchBuffer=b;}).catch(e=>{});
+  BGM_FILES.forEach((u,i)=>{fetch(u).then(r=>r.arrayBuffer()).then(b=>aCtx.decodeAudioData(b)).then(b=>{bgmBuffers[i]=b;if(bgmPending===i){bgmPending=-1;switchBGM(i);}}).catch(e=>{});});
 }
 function switchBGM(idx){
-  if(idx===bgmIdx||idx<0||idx>6)return;
-  if(bgmAudio){try{bgmAudio.pause();bgmAudio.currentTime=0;}catch(e){}}
-  const el=$('bgm'+idx);
-  if(!el){bgmIdx=-1;return;}
-  el.volume=0.5;
-  el.currentTime=0;
-  el.play().catch(e=>{});
-  bgmAudio=el;
-  bgmIdx=idx;
+  if(!aInit||idx===bgmIdx||idx<0||idx>6)return;
+  if(!bgmBuffers[idx]){bgmPending=idx;return;}
+  const n=aCtx.currentTime;
+  if(bgmSource&&bgmGain){
+    const oldSrc=bgmSource;const oldG=bgmGain;
+    oldG.gain.cancelScheduledValues(n);oldG.gain.setValueAtTime(oldG.gain.value,n);oldG.gain.setTargetAtTime(0,n,0.3);
+    setTimeout(()=>{try{oldSrc.stop()}catch(e){}try{oldSrc.disconnect()}catch(e){}try{oldG.disconnect()}catch(e){}},2000);
+  }
+  const src=aCtx.createBufferSource();src.buffer=bgmBuffers[idx];src.loop=true;
+  const g=aCtx.createGain();g.gain.value=0;g.gain.setTargetAtTime(0.5,n,0.3);
+  src.connect(g);g.connect(mGain);src.start(n);
+  bgmSource=src;bgmGain=g;bgmIdx=idx;
 }
 function playWhoosh2(){
-  const sw=$('bgm-switch');
-  if(!sw)return;
-  sw.volume=0.4;
-  sw.currentTime=0;
-  sw.play().catch(e=>{});
+  if(!aInit||!switchBuffer)return;
+  const n=aCtx.currentTime;const src=aCtx.createBufferSource();
+  src.buffer=switchBuffer;const g=aCtx.createGain();
+  g.gain.value=0.4;src.connect(g);g.connect(mGain);src.start(n);
 }
 
 // Narrative particle systems
@@ -787,7 +781,7 @@ const ss={ty:0,tp:0.25,cy:0,cp:0.25,tz:22,cz:22,tfov:55,cfov:55,tps:1,cps:1,ct:5
 let currentDay=-1,prevDay=-1;
 let dayTransition={active:false,phase:'idle',progress:0,fromDay:-1,toDay:0};
 let dayTime=0,goldenMode=false,timeScale=1;
-let microActive=false,microAlpha=0;const MICRO_THRESHOLD=0.40,MICRO_LOWER=0.25;
+let microActive=false,touchMicroActive=false,microAlpha=0;const MICRO_THRESHOLD=0.40,MICRO_LOWER=0.25;
 let summarySeg=-1,summaryTimer=0,summaryPlaying=false;
 
 // ========== HAND TRACKING ==========
@@ -846,16 +840,16 @@ async function initMP(){
     setLoad('创世之掌·七日谈','⏳ 加载 WASM…');
     const v=await m.FilesetResolver.forVisionTasks('lib/wasm');
     setLoad('创世之掌·七日谈','⏳ 加载模型…');
-    const r=await fetch('lib/hand_landmarker.task',{cache:'force-cache'});
+    const r=await fetch('lib/hand_landmarker.task');
     if(!r.ok)throw Error('模型文件加载失败');
     const b=await r.arrayBuffer();
     setLoad('创世之掌·七日谈','⏳ 初始化识别器…');
-    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.5,minTrackingConfidence:0.5});
+    hdl=await m.HandLandmarker.createFromOptions(v,{baseOptions:{modelAssetBuffer:new Uint8Array(b)},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.6,minTrackingConfidence:0.5});
     setLoad('创世之掌·七日谈','✨ 造物主之手已就绪');
     mpStarted=true;
   }catch(e){
     console.error('MP init error:',e);
-    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用 · 触控操作');
+    setLoad('创世之掌·七日谈','⚠️ 手势识别不可用');
   }
   completeBoot();
 }
@@ -899,10 +893,10 @@ function initAudio(){
   if(aInit)return;
   try{aCtx=new(window.AudioContext||window.webkitAudioContext)();if(aCtx.state==='suspended')aCtx.resume();}catch(e){return}
   mGain=aCtx.createGain();mGain.gain.value=0.8;mGain.connect(aCtx.destination);
-  rIn=aCtx.createDelay(0.35);const d2=aCtx.createDelay(0.22),d3=aCtx.createDelay(0.48);rIn.delayTime.value=0.35;d2.delayTime.value=0.22;d3.delayTime.value=0.48;
-  const f1=aCtx.createGain();f1.gain.value=0.2;const f2=aCtx.createGain();f2.gain.value=0.18;const f3=aCtx.createGain();f3.gain.value=0.15;const rG=aCtx.createGain();rG.gain.value=0.3;
+  rIn=aCtx.createDelay(0.35);const d2=aCtx.createDelay(0.3),d3=aCtx.createDelay(0.5);rIn.delayTime.value=0.35;d2.delayTime.value=0.3;d3.delayTime.value=0.5;
+  const f1=aCtx.createGain();f1.gain.value=0.08;const f2=aCtx.createGain();f2.gain.value=0.07;const f3=aCtx.createGain();f3.gain.value=0.06;const rG=aCtx.createGain();rG.gain.value=0.25;
   rIn.connect(f1);f1.connect(rIn);rIn.connect(d2);d2.connect(f2);f2.connect(d2);d2.connect(d3);d3.connect(f3);f3.connect(d3);d3.connect(rG);rG.connect(mGain);
-  [41.2,55,82.4,110,165].forEach((f,i)=>{const o=aCtx.createOscillator();o.type=i<2?'sine':'triangle';o.frequency.value=f;const l=aCtx.createOscillator();l.type='sine';l.frequency.value=0.06+i*0.03;const lg=aCtx.createGain();lg.gain.value=1.2;l.connect(lg);lg.connect(o.frequency);l.start();const fl=aCtx.createBiquadFilter();fl.type='lowpass';fl.frequency.value=100+i*100;fl.Q.value=1.5;const g=aCtx.createGain();g.gain.value=0.025-i*0.003;o.connect(fl);fl.connect(g);g.connect(mGain);g.connect(rIn);o.start();drones.push({o,f:fl});});
+  [41.2,55,82.4,110,165].forEach((f,i)=>{const o=aCtx.createOscillator();o.type=i<2?'sine':'triangle';o.frequency.value=f;const l=aCtx.createOscillator();l.type='sine';l.frequency.value=0.06+i*0.03;const lg=aCtx.createGain();lg.gain.value=1.2;l.connect(lg);lg.connect(o.frequency);l.start();const fl=aCtx.createBiquadFilter();fl.type='lowpass';fl.frequency.value=100+i*100;fl.Q.value=1.5;const g=aCtx.createGain();g.gain.value=0.025-i*0.003;o.connect(fl);fl.connect(g);g.connect(mGain);o.start();drones.push({o,f:fl,g});});
   aInit=true;initBGM();
 }
 function playNote(idx){if(!aInit)return;const s=[196,220,261.6,329.6,392],f=s[idx%5],n=aCtx.currentTime,o=aCtx.createOscillator();o.type='sine';o.frequency.value=f+gauss(0,1.5);const o2=aCtx.createOscillator();o2.type='triangle';o2.frequency.value=f*0.5;o2.detune.value=3;const g=aCtx.createGain();g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(0.07,n+0.015);g.gain.exponentialRampToValueAtTime(0.001,n+0.8);const fl=aCtx.createBiquadFilter();fl.type='bandpass';fl.frequency.value=f*1.5;fl.Q.value=4;o.connect(fl);o2.connect(fl);fl.connect(g);g.connect(mGain);g.connect(rIn);o.start(n);o.stop(n+0.9);o2.start(n);o2.stop(n+0.9);}
@@ -1053,14 +1047,17 @@ function animate(ts){
   if(fistRel.lock>0)fistRel.lock-=rdt;if(fistRel.cooldown>0)fistRel.cooldown-=rdt;
   if(dayTransition.active)updateDayTransition(rdt);dayTime+=dt;
 
-  // Micro-world activation via pinch
-  const microTarget=pinchStable&&fistRel.cooldown<=0&&handsCount<2?1:0;
+  // Micro-world activation via pinch or double-tap
+  const microTarget=(pinchStable&&fistRel.cooldown<=0&&handsCount<2)||touchMicroActive?1:0;
   microActive=microTarget>0.5;microAlpha=ema(microAlpha,microTarget,microActive?0.12:0.04);
+  if(!microActive)touchMicroActive=false;
   if(microActive)fistRel.hold=0;
 
   // Camera: macro (V2) or micro (360 rotation)
   if(microAlpha>0.01&&currentDay>=0){
-    const mDist=0.6;const mYaw=gs.sx*Math.PI*2,mPitch=(0.5-gs.sy)*0.4;
+    const mDist=0.6;
+    const mYaw=gs.hp?gs.sx*Math.PI*2:mobileYawOffset;
+    const mPitch=gs.hp?(0.5-gs.sy)*0.4:0;
     const mx=Math.sin(mYaw)*Math.cos(mPitch)*mDist;
     const my=Math.sin(mPitch)*mDist+0.15;
     const mz=Math.cos(mYaw)*Math.cos(mPitch)*mDist;
@@ -1132,7 +1129,7 @@ function animate(ts){
 
   if(gs.sp>0.3&&!microActive){vortex.visible=true;const vS=gs.sp*1.5;vortex.scale.set(1-vS,1,1-vS);vortex.material.opacity=gs.sp*0.5;vortex.rotation.y+=dt*(2+gs.sp*8);const vp=vortex.geometry.attributes.position;for(let i=0;i<vortex._N;i++){const a=i/vortex._N*6.2832,rad=(0.2+i/vortex._N*12)*(1-gs.sp*0.6),h=(1-i/vortex._N)*8*(1-gs.sp*0.5);vp.setXYZ(i,Math.cos(a+tm*3)*rad,h-4,Math.sin(a+tm*3)*rad);}vp.needsUpdate=true;}else{vortex.visible=false;}
 
-  if(aInit){drones.forEach((d,i)=>{d.f.frequency.setTargetAtTime(80+gs.sy*1800+i*60,aCtx.currentTime,0.1);});const cf=Math.round(gs.sfu);if(cf>0&&cf!==pf)playNote(cf-1);pp=gs.pinch;pf=cf;gt+=rdt;if(gs.sp>0.3&&gt>0.1){playGrain(gs.sp);gt=0;}}
+  if(aInit){const droneVol=gs.hp?1:0.12;drones.forEach((d,i)=>{if(d.g)d.g.gain.setTargetAtTime((0.025-i*0.003)*droneVol,aCtx.currentTime,0.15);d.f.frequency.setTargetAtTime(80+gs.sy*1800+i*60,aCtx.currentTime,0.1);});const cf=Math.round(gs.sfu);if(cf>0&&cf!==pf&&gs.hp)playNote(cf-1);pp=gs.pinch;pf=cf;gt+=rdt;if(gs.sp>0.3&&gt>0.1&&gs.hp){playGrain(gs.sp);gt=0;}}
 
   bloomCurrent=ema(bloomCurrent,bloomTarget,0.06);
   if(goldenMode){coreMat.color.lerp(new T.Color(0xffcc66),0.02);coreLight.color.lerp(new T.Color(0xffaa44),0.02);ambLight.color.lerp(new T.Color(0x1a1208),0.02);}
@@ -1187,9 +1184,9 @@ document.addEventListener('touchmove',e=>{
 document.addEventListener('touchend',e=>{
   const now=Date.now();
   if(now-lastTap<400&&touchCount===1&&!dayTransition.active&&fistRel.lock<=0){
-    if(microAlpha<0.1){microActive=true;fistRel.cooldown=0.3;toast('🌍 微观世界');}
-    else{microActive=false;microAlpha=0;toast('🌌 返回宇宙');}
-    lastTap=0;touchCount=0;return; // ← skip swipe check after double tap
+    if(microAlpha<0.1){touchMicroActive=true;fistRel.cooldown=0.3;toast('🌍 微观世界');}
+    else{touchMicroActive=false;microAlpha=0;toast('🌌 返回宇宙');}
+    lastTap=0;touchCount=0;return;
   }
   lastTap=now;
   if(e.touches.length===0&&e.changedTouches.length===1&&touchCount<=1&&microAlpha<0.3){
