@@ -817,12 +817,14 @@ let camStream=null;
 async function initCam(){
   if(!isHTTP)return false;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    if(isMobile){setLoad('创世之掌·七日谈','📱 触控操作 · 无摄像头');}else{setLoad('创世之掌·七日谈','🔒 摄像头不可用');}
+    setLoad('创世之掌·七日谈','⚠️ 浏览器不支持摄像头');
+    $hint.innerHTML='请使用 Chrome 浏览器打开此页面';
     return false;
   }
   setLoad('创世之掌·七日谈','📷 请求摄像头权限…');
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
   video.srcObject=null;
+  const RETRY_ERRORS=['NotFoundError','OverconstrainedError','TypeError'];
   try{
     let constr={video:true};
     if(isMobile){constr.video.width={ideal:320};constr.video.height={ideal:240};}else{constr.video.width={ideal:640};constr.video.height={ideal:480};}
@@ -830,12 +832,13 @@ async function initCam(){
     try{
       s=await navigator.mediaDevices.getUserMedia(constr);
     }catch(e1){
-      console.warn('Camera attempt 1 failed:',e1.message);
+      if(!RETRY_ERRORS.includes(e1.name))throw e1;
+      console.warn('Camera attempt 1 failed:',e1.name);
       constr.video={...constr.video,facingMode:{exact:'environment'}};
       try{s=await navigator.mediaDevices.getUserMedia(constr);}catch(e2){
-        console.warn('Camera attempt 2 (rear) failed:',e2.message);
+        if(!RETRY_ERRORS.includes(e2.name))throw e2;
+        console.warn('Camera attempt 2 (rear) failed:',e2.name);
         s=await navigator.mediaDevices.getUserMedia({video:true});
-        console.log('Camera attempt 3 (any): ok');
       }
     }
     camStream=s;video.srcObject=s;$skip.style.display='none';
@@ -845,8 +848,17 @@ async function initCam(){
     camInitDone=true;
     return true;
   }catch(e){
-    console.error('All camera attempts failed:',e.message||e);
-    setLoad('创世之掌·七日谈',isMobile?'📱 触控操作':'📷 摄像头不可用 · 触控模式');
+    const err=e.name||'';
+    if(err==='NotAllowedError'){
+      setLoad('创世之掌·七日谈','⚠️ 摄像头权限被拒绝');
+      $hint.innerHTML='检查: 浏览器设置→权限→摄像头→允许<br>vivo系统: 设置→隐私→权限管理→浏览器→相机';
+    }else if(err==='NotFoundError'){
+      setLoad('创世之掌·七日谈','⚠️ 未检测到摄像头');
+    }else if(err==='NotReadableError'){
+      setLoad('创世之掌·七日谈','⚠️ 摄像头被占用');
+    }else{
+      setLoad('创世之掌·七日谈','⚠️ 摄像头不可用: '+err);
+    }
     return false;
   }
 }
