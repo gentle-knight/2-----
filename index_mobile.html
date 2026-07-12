@@ -7,7 +7,7 @@
 <title>创世之掌 · 七日谈 (移动版)</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Segoe UI',system-ui,sans-serif}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Segoe UI',system-ui,sans-serif;touch-action:manipulation;-ms-touch-action:manipulation}
 canvas{display:block;position:fixed;top:0;left:0}
 video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-events:none;transform:scaleX(-1);border-radius:6px;border:1px solid rgba(80,120,200,0.12)}
 
@@ -74,7 +74,7 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 #verse-3d p{color:rgba(230,245,255,0.85);font-size:17px;letter-spacing:5px;font-style:italic;line-height:2.0;font-family:'Georgia','Times New Roman',serif;text-shadow:0 0 40px rgba(80,120,200,0.25),0 0 100px rgba(50,80,160,0.12)}
 
 /* Micro-world overlay */
-#micro-overlay{position:fixed;bottom:18%;left:50%;transform:translateX(-50%);z-index:31;pointer-events:none;text-align:center;opacity:0;transition:opacity 0.8s}
+#micro-overlay{position:fixed;bottom:calc(18% + 100px);left:50%;transform:translateX(-50%);z-index:31;pointer-events:none;text-align:center;opacity:0;transition:none}
 #micro-overlay.on{opacity:1}
 #micro-overlay .micro-name{font-family:'Cormorant Garamond','Georgia',serif;font-size:20px;letter-spacing:8px;color:rgba(255,242,225,0.9);text-shadow:0 0 40px rgba(220,190,130,0.3);margin-bottom:6px}
 #micro-overlay .micro-desc{font-family:'Cormorant Garamond','Georgia',serif;font-size:15px;letter-spacing:5px;color:rgba(205,220,250,0.75);max-width:600px;line-height:1.8;text-shadow:0 0 20px rgba(80,120,200,0.15)}
@@ -96,7 +96,7 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
   video{width:120px;opacity:0.1}
   #verse-3d{top:8%;width:90%}
   #verse-3d p{font-size:13px;letter-spacing:3px}
-  #micro-overlay{bottom:14%}#micro-overlay .micro-name{font-size:15px;letter-spacing:5px}#micro-overlay .micro-desc{font-size:12px;letter-spacing:3px;max-width:360px}
+  #micro-overlay{bottom:calc(14% + 80px)}#micro-overlay .micro-name{font-size:15px;letter-spacing:5px}#micro-overlay .micro-desc{font-size:12px;letter-spacing:3px;max-width:360px}
 }
 /* Mobile nav buttons - narrower, only the arrows themselves */
 #mobile-nav{position:fixed;bottom:0;left:0;right:0;z-index:15;display:flex;justify-content:space-between;pointer-events:none;height:calc(100% - 100px);top:0;padding:60px 0 40px;opacity:0;transition:opacity 0.8s}
@@ -119,6 +119,9 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 #summary-overlay .seg-divider{width:40px;height:1px;background:linear-gradient(90deg,transparent,rgba(200,180,130,0.3),transparent);margin:10px auto}
 #credits{position:fixed;bottom:10%;left:50%;transform:translateX(-50%);z-index:33;font-size:11px;letter-spacing:6px;color:rgba(180,160,130,0.4);opacity:0;transition:opacity 2s;pointer-events:none;font-weight:300}
 #credits.show{opacity:1}
+#mode-toggle{position:fixed;top:20px;right:20px;z-index:50;background:rgba(10,15,30,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(100,150,220,0.2);border-radius:16px;padding:6px 14px;color:rgba(180,210,240,0.7);font-size:11px;letter-spacing:2px;cursor:pointer;transition:all 0.3s;outline:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#mode-toggle:active{background:rgba(80,140,220,0.15)}
+#mode-toggle.touch{background:rgba(220,120,60,0.15);border-color:rgba(220,160,80,0.3);color:rgba(255,200,150,0.85)}
 </style>
 </head>
 <body>
@@ -136,6 +139,7 @@ video{position:fixed;top:0;left:0;width:240px;opacity:0.15;z-index:1;pointer-eve
 <div id="credits">制作 lalalaure</div>
 <div id="toast"></div>
 <div id="mobile-nav"><button class="nav-btn nav-prev" id="nav-prev"><span class="arrow">‹</span></button><button class="nav-btn nav-next" id="nav-next"><span class="arrow">›</span></button></div>
+<button id="mode-toggle">📷 触控</button>
 
 <div id="hud">
   <div class="label">创世之掌</div>
@@ -279,16 +283,16 @@ function renderMicroOverlay(){
   const mw=microWorlds[currentDay];
   if(!mw)return;
   microCam.aspect=innerWidth/innerHeight;microCam.updateProjectionMatrix();
-  // Render micro scene to microRT
-  renderer.setRenderTarget(microRT);
+  // Render micro scene with opacity overlay: directly on top of existing screen content
+  // (avoids compositing shader issues on mobile GPU)
+  const oldBg=microScene.background;
+  microScene.background=null;
+  const oldClear=renderer.autoClear;
+  renderer.autoClear=false;
+  renderer.clearDepth();
   renderer.render(microScene,microCam);
-  renderer.setRenderTarget(null);
-  // Composite micro over bloom result (bloomRT has the composite bloom output)
-  microQuadMat.uniforms.tMicro.value=microRT.texture;
-  microQuadMat.uniforms.tMacro.value=bloomRT.texture;
-  microQuadMat.uniforms.alpha.value=microAlpha;
-  _bloomQuad.material=microQuadMat;
-  renderer.render(_bloomScene,_bloomCam);
+  renderer.autoClear=oldClear;
+  microScene.background=oldBg;
 }
 
 function bloomBurst(intensity=1.5){
@@ -744,6 +748,15 @@ const rbp=[];for(let i=0;i<2000;i++){const t=Math.random(),a=t*Math.PI,r=0.35+Ma
 const microWorlds=[];
 [createMW0,createMW1,createMW2,createMW3,createMW4,createMW5,createMW6].forEach((fn,i)=>{let w;try{w=fn();}catch(e){console.error('MW'+i+' error:',e.message);}if(!w||!w.isObject3D){w=new T.Group();}w.visible=false;microWorlds.push(w);});
 
+// Ensure each micro-world has at least one visible object
+microWorlds.forEach((w,i)=>{
+  if(w.children.length===0){
+    const fallback=new T.Mesh(new T.SphereGeometry(0.08,16,16),new T.MeshBasicMaterial({color:[0xff6633,0x33ccff,0x66ff33,0xffcc00,0xff66cc,0xcc66ff,0x66ccff][i%7],transparent:true,opacity:0.8}));
+    fallback.position.set(0,0,0);
+    w.add(fallback);
+    console.log('MW'+i+': added fallback sphere');
+  }
+});
 // ========== MICRO SCENE (independent compositing) ==========
 const microScene=new T.Scene();
 microScene.background=new T.Color(0x000000);
@@ -831,7 +844,7 @@ async function initCam(){
 window.addEventListener('beforeunload',()=>{if(camStream)camStream.getTracks().forEach(t=>t.stop())});
 window.addEventListener('beforeunload',()=>{if(camStream)camStream.getTracks().forEach(t=>t.stop())});
 
-let hdl=null,lastVT=-1,camInitDone=false,mpStarted=false;
+let hdl=null,lastVT=-1,camInitDone=false,mpStarted=false,detectSkip=0;
 async function initMP(){
   if(!isHTTP||!camInitDone){if(!isHTTP)setLoad('创世之掌·七日谈','💡 文件协议 — 摄像头不可用，进入预览');completeBoot();return;}
   setLoad('创世之掌·七日谈','⏳ 加载推理引擎…');
@@ -873,7 +886,10 @@ $skip.addEventListener('click',()=>{
 });
 
 function detectFrame(){
+  if(touchModeForced){gs.hp=false;gs2.hp=false;handsCount=0;return;}
   if(!hdl||video.readyState<2)return;
+  // Skip frames on mobile to reduce detection lag (every 3rd frame)
+  detectSkip++;if(detectSkip%3!==0)return;
   const n=performance.now();
   if(video.currentTime===lastVT)return;
   lastVT=video.currentTime;
@@ -890,7 +906,11 @@ function detectFrame(){
 // ========== AUDIO ==========
 let aCtx=null,aInit=false,drones=[],mGain=null,rIn=null;
 function initAudio(){
-  if(aInit)return;
+  if(aInit){
+    // Resume if suspended (needed when created outside user gesture)
+    if(aCtx&&aCtx.state==='suspended'){try{aCtx.resume()}catch(e){}}
+    return;
+  }
   try{aCtx=new(window.AudioContext||window.webkitAudioContext)();if(aCtx.state==='suspended')aCtx.resume();}catch(e){return}
   mGain=aCtx.createGain();mGain.gain.value=0.8;mGain.connect(aCtx.destination);
   rIn=aCtx.createDelay(0.35);const d2=aCtx.createDelay(0.3),d3=aCtx.createDelay(0.5);rIn.delayTime.value=0.35;d2.delayTime.value=0.3;d3.delayTime.value=0.5;
@@ -1047,17 +1067,17 @@ function animate(ts){
   if(fistRel.lock>0)fistRel.lock-=rdt;if(fistRel.cooldown>0)fistRel.cooldown-=rdt;
   if(dayTransition.active)updateDayTransition(rdt);dayTime+=dt;
 
-  // Micro-world activation via pinch or double-tap
-  const microTarget=(pinchStable&&fistRel.cooldown<=0&&handsCount<2)||touchMicroActive?1:0;
+  // Micro-world activation via pinch or double-tap (blocked during day transition)
+  const microTarget=(!dayTransition.active&&pinchStable&&fistRel.cooldown<=0&&handsCount<2)||touchMicroActive?1:0;
   microActive=microTarget>0.5;microAlpha=ema(microAlpha,microTarget,microActive?0.12:0.04);
   if(!microActive)touchMicroActive=false;
   if(microActive)fistRel.hold=0;
 
-  // Camera: macro (V2) or micro (360 rotation)
+  // Camera: macro (V2) or micro (360 rotation) with unified yaw
+  const mBaseYaw=gs.sx*Math.PI*2,mBasePitch=(0.5-gs.sy)*0.4;
   if(microAlpha>0.01&&currentDay>=0){
     const mDist=0.6;
-    const mYaw=gs.hp?gs.sx*Math.PI*2:mobileYawOffset;
-    const mPitch=gs.hp?(0.5-gs.sy)*0.4:0;
+    const mYaw=mBaseYaw+mobileYawOffset,mPitch=mBasePitch;
     const mx=Math.sin(mYaw)*Math.cos(mPitch)*mDist;
     const my=Math.sin(mPitch)*mDist+0.15;
     const mz=Math.cos(mYaw)*Math.cos(mPitch)*mDist;
@@ -1069,8 +1089,7 @@ function animate(ts){
   }else{
     camera.position.set(Math.sin(cy+mobileYawOffset)*Math.cos(cp)*cz,Math.sin(cp)*cz,Math.cos(cy+mobileYawOffset)*Math.cos(cp)*cz);
     // Reset microCam to default orbit
-    const mYaw=gs.sx*Math.PI*2,mPitch=(0.5-gs.sy)*0.4;
-    microCam.position.set(Math.sin(mYaw+mobileYawOffset)*Math.cos(mPitch)*0.6,Math.sin(mPitch)*0.6+0.15,Math.cos(mYaw+mobileYawOffset)*Math.cos(mPitch)*0.6);
+    microCam.position.set(Math.sin(mBaseYaw+mobileYawOffset)*Math.cos(mBasePitch)*0.6,Math.sin(mBasePitch)*0.6+0.15,Math.cos(mBaseYaw+mobileYawOffset)*Math.cos(mBasePitch)*0.6);
     microCam.lookAt(0,0,0);
   }
   camera.lookAt(0,0,0);
@@ -1156,6 +1175,9 @@ document.addEventListener('touchstart',initAudio,{once:true});
 document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const d=currentDay<0?0:e.key==='ArrowRight'?(currentDay+1)%8:(currentDay+7)%8;setDay(d);}});
 // ========== MOBILE TOUCH: pinch zoom + drag rotate + double tap ==========
 document.addEventListener('touchstart',e=>{
+  // Skip preventDefault to allow click events on nav buttons
+  if(e.target.closest('#mobile-nav'))return;
+  e.preventDefault();
   touchStartX=e.touches[0].clientX;
   touchStartY=e.touches[0].clientY;
   touchCount=e.touches.length;
@@ -1164,7 +1186,7 @@ document.addEventListener('touchstart',e=>{
     const dy=e.touches[0].clientY-e.touches[1].clientY;
     touchDist=Math.sqrt(dx*dx+dy*dy);
   }
-},{passive:true});
+},{passive:false});
 document.addEventListener('touchmove',e=>{
   if(e.touches.length===2){
     const dx=e.touches[0].clientX-e.touches[1].clientX;
@@ -1184,8 +1206,8 @@ document.addEventListener('touchmove',e=>{
 document.addEventListener('touchend',e=>{
   const now=Date.now();
   if(now-lastTap<400&&touchCount===1&&!dayTransition.active&&fistRel.lock<=0){
-    if(microAlpha<0.1){touchMicroActive=true;fistRel.cooldown=0.3;toast('🌍 微观世界');}
-    else{touchMicroActive=false;microAlpha=0;toast('🌌 返回宇宙');}
+    if(microAlpha<0.1){touchMicroActive=true;microActive=true;microAlpha=1;fistRel.cooldown=0.3;toast('🌍 微观世界');}
+    else{touchMicroActive=false;microActive=false;microAlpha=0;toast('🌌 返回宇宙');}
     lastTap=0;touchCount=0;return;
   }
   lastTap=now;
@@ -1201,6 +1223,16 @@ document.addEventListener('touchend',e=>{
 // Mobile nav buttons
 $navPrev.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0)goPrevDay();});
 $navNext.addEventListener('click',()=>{if(!dayTransition.active&&fistRel.lock<=0)goNextDay();});
+// Touch mode toggle (force touch fallback even with camera)
+let touchModeForced=false;
+const $modeToggle=$('mode-toggle');
+$modeToggle.addEventListener('click',()=>{
+  touchModeForced=!touchModeForced;
+  $modeToggle.classList.toggle('touch',touchModeForced);
+  $modeToggle.textContent=touchModeForced?'👆 触控':'📷 触控';
+  if(touchModeForced){toast('👆 已强制触控模式');$hintDisplay.textContent='👆 触控模式 · 滑动切换 · 双击微世界';}
+  else{toast('📷 恢复摄像头模式');$hintDisplay.textContent='🤜🤛 手势控制 · 点击箭头/滑动切换七日';}
+});
 
 setLoad('创世之掌·七日谈','起初，神创造天地…');
 requestAnimationFrame(animate);
